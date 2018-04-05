@@ -101,6 +101,7 @@ class HikCamera(object):
         self.hik_request.headers.update(DEFAULT_HEADERS)
 
         # Define event stream processing thread
+        self.max_retrydelay = 300
         self.kill_thrd = threading.Event()
         self.reset_thrd = threading.Event()
         self.thrd = threading.Thread(
@@ -421,19 +422,23 @@ class HikCamera(object):
                 elif reset_event.is_set():
                     # We need to reset the connection.
                     raise ValueError('Watchdog failed.')
-
+            except (ET.ParseError) as err:
+                _LOGGING.warning('%s Parser failure - %s', self.name, err)
+                _LOGGING.debug('%s Dump of parse string: %s', self.name, parse_string)
+                parse_string = ""
             except (ValueError,
                     requests.exceptions.ChunkedEncodingError) as err:
                 fail_count += 1
                 reset_event.clear()
+                retrydelay = min(fail_count*5+5, self.max_retrydelay)
                 _LOGGING.warning('%s Connection Failed. Waiting %ss. Err: %s',
-                                 self.name, (fail_count * 5) + 5, err)
+                                 self.name, retrydelay, err)
                 parse_string = ""
                 self.watchdog.stop()
                 self.hik_request.close()
                 time.sleep(5)
                 self.update_stale()
-                time.sleep(fail_count * 5)
+                time.sleep(retrydelay-5)
                 continue
 
     def process_stream(self, tree):
